@@ -19,7 +19,7 @@ export function LandingPage() {
     <div className="min-h-screen bg-background relative overflow-hidden flex flex-col">
       {/* Animated background grid */}
       <div className="absolute inset-0 bg-[linear-gradient(rgba(0,255,255,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(0,255,255,0.08)_1px,transparent_1px)] bg-[size:60px_60px] [mask-image:radial-gradient(ellipse_80%_80%_at_50%_50%,black_40%,transparent_100%)]" />
-      
+
       {/* Glow effects */}
       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/20 rounded-full blur-[120px] animate-pulse" />
       <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-accent/20 rounded-full blur-[100px] animate-pulse" />
@@ -35,13 +35,14 @@ export function LandingPage() {
 
         {/* Hero Section */}
         <main className="flex-1 flex flex-col items-center justify-center px-6 text-center">
-<h1 className="text-5xl md:text-7xl lg:text-8xl font-bold tracking-tight mb-12">
-            <span className="text-primary">ITRIX</span>
-            <span className="text-foreground ml-4">2026</span>
+          <h1 className="text-5xl md:text-7xl lg:text-8xl font-bold tracking-tight mb-12">
+            <span className="text-foreground">COMMIT</span>
+            <span className="text-muted-foreground mx-4">or</span>
+            <span className="text-primary">ROLLBACK</span>
           </h1>
 
-          <Button 
-            size="lg" 
+          <Button
+            size="lg"
             className="bg-primary text-primary-foreground hover:bg-primary/90 px-12 py-7 text-xl font-semibold"
             onClick={() => setView('login')}
           >
