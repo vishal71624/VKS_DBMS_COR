@@ -1833,13 +1833,21 @@ function executeSQL(query: string, tables: TableData[]): { columns: string[]; ro
       const joinTable = tableMap.get(joinTableName)
       if (!joinTable) continue
       
-      // Determine which column index to join on
-      const leftColIdx = leftTable === mainTableName 
-        ? joinedData.columns.findIndex(c => c.toLowerCase() === leftCol)
-        : joinTable.columns.findIndex(c => c.name.toLowerCase() === leftCol)
-      const rightColIdx = rightTable === joinTableName
-        ? joinTable.columns.findIndex(c => c.name.toLowerCase() === rightCol)
-        : joinedData.columns.findIndex(c => c.toLowerCase() === rightCol)
+      // Determine which column index to join on for the main/joined data side
+      // leftTable and rightTable refer to the table aliases in the ON clause
+      // We need to find the column in joinedData (main side) and joinTable (join side)
+      let mainColIdx: number
+      let joinColIdx: number
+      
+      if (leftTable === joinTableName.toLowerCase()) {
+        // Left side of ON refers to the join table, right side refers to main data
+        joinColIdx = joinTable.columns.findIndex(c => c.name.toLowerCase() === leftCol)
+        mainColIdx = joinedData.columns.findIndex(c => c.toLowerCase() === rightCol)
+      } else {
+        // Left side of ON refers to main data, right side refers to join table
+        mainColIdx = joinedData.columns.findIndex(c => c.toLowerCase() === leftCol)
+        joinColIdx = joinTable.columns.findIndex(c => c.name.toLowerCase() === rightCol)
+      }
       
       // Add join table columns
       const newColumns = [...joinedData.columns, ...joinTable.columns.map(c => c.name)]
@@ -1847,11 +1855,11 @@ function executeSQL(query: string, tables: TableData[]): { columns: string[]; ro
       
       if (joinType === 'inner' || joinType === 'left') {
         for (const row of joinedData.rows) {
-          const mainValue = row[leftTable === mainTableName ? leftColIdx : rightColIdx]
+          const mainValue = row[mainColIdx]
           let matched = false
           
           for (const joinRow of joinTable.rows) {
-            const joinValue = joinRow[rightTable === joinTableName ? rightColIdx : leftColIdx]
+            const joinValue = joinRow[joinColIdx]
             if (mainValue === joinValue) {
               newRows.push([...row, ...joinRow])
               matched = true
@@ -1895,12 +1903,30 @@ function executeSQL(query: string, tables: TableData[]): { columns: string[]; ro
       const resultColumns: string[] = []
       const resultRows: (string | number | null)[][] = []
       
+      // Build result columns first (only once)
+      for (const part of selectParts) {
+        const aggMatch = part.match(/(count|sum|avg|max|min)\s*\(\s*(\*|\w+)\s*\)/i)
+        const aliasMatch = part.match(/\s+as\s+(\w+)/i)
+        
+        if (aggMatch) {
+          const func = aggMatch[1].toLowerCase()
+          resultColumns.push(aliasMatch ? aliasMatch[1] : func)
+        } else {
+          const colName = part.replace(/\s+as\s+\w+/i, '').trim()
+          const colIdx = joinedData.columns.findIndex(c => c.toLowerCase() === colName.toLowerCase())
+          if (colIdx >= 0) {
+            resultColumns.push(aliasMatch ? aliasMatch[1] : joinedData.columns[colIdx])
+          } else {
+            resultColumns.push(aliasMatch ? aliasMatch[1] : colName)
+          }
+        }
+      }
+      
       for (const [, groupRows] of groups) {
         const resultRow: (string | number | null)[] = []
         
         for (const part of selectParts) {
           const aggMatch = part.match(/(count|sum|avg|max|min)\s*\(\s*(\*|\w+)\s*\)/i)
-          const aliasMatch = part.match(/\s+as\s+(\w+)/i)
           
           if (aggMatch) {
             const func = aggMatch[1].toLowerCase()
@@ -1919,17 +1945,13 @@ function executeSQL(query: string, tables: TableData[]): { columns: string[]; ro
             }
             
             resultRow.push(func === 'avg' ? Math.round(value * 100) / 100 : value)
-            if (resultColumns.length < selectParts.length) {
-              resultColumns.push(aliasMatch ? aliasMatch[1] : func)
-            }
           } else {
             const colName = part.replace(/\s+as\s+\w+/i, '').trim()
             const colIdx = joinedData.columns.findIndex(c => c.toLowerCase() === colName.toLowerCase())
             if (colIdx >= 0) {
               resultRow.push(groupRows[0][colIdx])
-              if (resultColumns.length < selectParts.length) {
-                resultColumns.push(aliasMatch ? aliasMatch[1] : joinedData.columns[colIdx])
-              }
+            } else {
+              resultRow.push(null)
             }
           }
         }
@@ -1937,7 +1959,39 @@ function executeSQL(query: string, tables: TableData[]): { columns: string[]; ro
       }
       
       groupedData = { columns: resultColumns, rows: resultRows }
-      filteredRows = resultRows
+      
+      // Apply HAVING clause to filter grouped results
+      const havingMatch = remainder.match(/having\s+(.+?)(?:\s+order\s+|\s+limit\s+|$)/i)
+      if (havingMatch) {
+        const havingClause = havingMatch[1].trim()
+        
+        // Parse HAVING condition (e.g., COUNT(*) > 2, SUM(salary) >= 100000)
+        const havingCondMatch = havingClause.match(/(count|sum|avg|max|min)\s*\(\s*(\*|\w+)\s*\)\s*(>|<|>=|<=|=)\s*(\d+)/i)
+        if (havingCondMatch) {
+          const func = havingCondMatch[1].toLowerCase()
+          const havingOp = havingCondMatch[3]
+          const havingVal = Number(havingCondMatch[4])
+          
+          // Find the column index in result that corresponds to this aggregate
+          const aggColIdx = resultColumns.findIndex(c => c.toLowerCase() === func)
+          
+          if (aggColIdx >= 0) {
+            groupedData.rows = groupedData.rows.filter(row => {
+              const val = Number(row[aggColIdx])
+              switch (havingOp) {
+                case '>': return val > havingVal
+                case '<': return val < havingVal
+                case '>=': return val >= havingVal
+                case '<=': return val <= havingVal
+                case '=': return val === havingVal
+                default: return true
+              }
+            })
+          }
+        }
+      }
+      
+      filteredRows = groupedData.rows
     }
     
     // Select columns
@@ -2069,6 +2123,39 @@ function filterRows(
   tableMap: Map<string, TableData>,
   mainTableName: string
 ): (string | number | null)[][] {
+  // Helper function to split WHERE clause on AND while preserving subqueries
+  function splitOnAnd(clause: string): string[] {
+    const conditions: string[] = []
+    let depth = 0
+    let current = ''
+    const words = clause.split(/(\s+)/g)
+    
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i]
+      // Track parentheses depth
+      for (const char of word) {
+        if (char === '(') depth++
+        if (char === ')') depth--
+      }
+      
+      // Check if this is "AND" keyword at depth 0
+      if (depth === 0 && word.toLowerCase() === 'and') {
+        if (current.trim()) {
+          conditions.push(current.trim())
+        }
+        current = ''
+      } else {
+        current += word
+      }
+    }
+    
+    if (current.trim()) {
+      conditions.push(current.trim())
+    }
+    
+    return conditions.length > 0 ? conditions : [clause]
+  }
+
   // Handle NOT IN subquery
   const notInMatch = whereClause.match(/(\w+)\s+not\s+in\s*\(\s*select\s+(\w+)\s+from\s+(\w+)/i)
   if (notInMatch) {
@@ -2081,7 +2168,17 @@ function filterRows(
       const excludeValues = new Set(subTable.rows.map(r => r[subColIdx]))
       const colIdx = columns.findIndex(c => c.toLowerCase() === col.toLowerCase())
       
-      return rows.filter(row => !excludeValues.has(row[colIdx]))
+      // Filter by NOT IN first
+      let filteredRows = rows.filter(row => !excludeValues.has(row[colIdx]))
+      
+      // Check if there are additional conditions after the subquery
+      const afterSubquery = whereClause.replace(/(\w+)\s+not\s+in\s*\([^)]+\)/i, '').trim()
+      if (afterSubquery && afterSubquery.toLowerCase().startsWith('and ')) {
+        const additionalConditions = afterSubquery.substring(4).trim()
+        return filterRows(additionalConditions, columns, filteredRows, tableMap, mainTableName)
+      }
+      
+      return filteredRows
     }
   }
   
@@ -2097,7 +2194,17 @@ function filterRows(
       const includeValues = new Set(subTable.rows.map(r => r[subColIdx]))
       const colIdx = columns.findIndex(c => c.toLowerCase() === col.toLowerCase())
       
-      return rows.filter(row => includeValues.has(row[colIdx]))
+      // Filter by IN first
+      let filteredRows = rows.filter(row => includeValues.has(row[colIdx]))
+      
+      // Check if there are additional conditions after the subquery
+      const afterSubquery = whereClause.replace(/(\w+)\s+in\s*\([^)]+\)/i, '').trim()
+      if (afterSubquery && afterSubquery.toLowerCase().startsWith('and ')) {
+        const additionalConditions = afterSubquery.substring(4).trim()
+        return filterRows(additionalConditions, columns, filteredRows, tableMap, mainTableName)
+      }
+      
+      return filteredRows
     }
   }
   
@@ -2117,8 +2224,8 @@ function filterRows(
     return rows.filter(row => row[colIdx] !== null)
   }
   
-  // Handle simple comparisons with AND/OR
-  const conditions = whereClause.split(/\s+and\s+/i)
+  // Handle simple comparisons with AND - use safe splitting that respects parentheses
+  const conditions = splitOnAnd(whereClause)
   
   return rows.filter(row => {
     return conditions.every(cond => {
