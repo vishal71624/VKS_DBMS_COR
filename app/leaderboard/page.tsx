@@ -23,7 +23,14 @@ export default function PublicLeaderboardPage() {
   const [animate, setAnimate] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [autoRefresh, setAutoRefresh] = useState(true)
-  const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const [isMounted, setIsMounted] = useState(false)
+  
+  // Track when component has mounted to avoid hydration mismatch
+  useEffect(() => {
+    setIsMounted(true)
+    setLastRefresh(new Date())
+  }, [])
 
   const loadLeaderboardData = useCallback(async () => {
     setIsLoading(true)
@@ -112,9 +119,11 @@ export default function PublicLeaderboardPage() {
                 )}
                 <span className="ml-2">Refresh</span>
               </Button>
-              <span className="text-xs text-muted-foreground">
-                Last: {lastRefresh.toLocaleTimeString()}
-              </span>
+              {isMounted && lastRefresh && (
+                <span className="text-xs text-muted-foreground">
+                  Last: {lastRefresh.toLocaleTimeString()}
+                </span>
+              )}
             </div>
           </div>
         </header>
