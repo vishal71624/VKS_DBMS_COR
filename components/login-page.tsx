@@ -59,7 +59,7 @@ export function LoginPage() {
         <div className="flex items-center justify-center gap-3 mb-8">
           <Database className="w-10 h-10 text-primary" />
           <div className="text-center">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">COMMIT OR ROLLBACK</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">ITRIX 2026</h1>
             <p className="text-sm text-muted-foreground">IST, CEG, Anna University</p>
           </div>
         </div>
