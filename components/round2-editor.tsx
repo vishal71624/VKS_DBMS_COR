@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useGameStore, TableData, TestCase, TestCaseResult } from '@/lib/game-store'
+import { runTestCasesWithEngine } from '@/lib/sql-executor'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
@@ -292,21 +293,25 @@ export function Round2Editor() {
     if (!currentAnswer.code.trim() || !currentChallenge) return
     
     setIsRunning(true)
-    await new Promise(resolve => setTimeout(resolve, 400))
     
-    // Run test cases
-    const results = runTestCases(currentAnswer.code)
-    
-    setAnswers(prev => ({
-      ...prev,
-      [currentQuestionIndex]: {
-        ...prev[currentQuestionIndex],
-        testResults: results
-      }
-    }))
-    
-    setActiveTab('result')
-    setIsRunning(false)
+    try {
+      // Run test cases using PGlite engine
+      const results = await runTestCasesWithEngine(currentAnswer.code, currentChallenge.testCases)
+      
+      setAnswers(prev => ({
+        ...prev,
+        [currentQuestionIndex]: {
+          ...prev[currentQuestionIndex],
+          testResults: results
+        }
+      }))
+      
+      setActiveTab('result')
+    } catch (error) {
+      console.error('Error running test cases:', error)
+    } finally {
+      setIsRunning(false)
+    }
   }
 
   const handleNavigate = (index: number) => {
@@ -322,16 +327,34 @@ export function Round2Editor() {
     let totalScore = 0
     let questionsAttempted = 0
     
-    round2Challenges.forEach((challenge, idx) => {
+    // Process each challenge sequentially using PGlite engine
+    for (let idx = 0; idx < round2Challenges.length; idx++) {
+      const challenge = round2Challenges[idx]
       const answer = answers[idx]
+      
       if (answer?.code.trim()) {
         questionsAttempted++
-        // Navigate to each question and submit
-        goToQuestion(idx)
-        const result = submitRound2Answer(answer.code)
-        totalScore += result.pointsEarned
+        
+        // Run test cases using PGlite engine
+        const testResults = await runTestCasesWithEngine(answer.code, challenge.testCases)
+        
+        // Calculate points based on passed test cases
+        let pointsEarned = 0
+        challenge.testCases.forEach((tc, tcIdx) => {
+          if (testResults[tcIdx]?.passed) {
+            pointsEarned += tc.points
+          }
+        })
+        
+        totalScore += pointsEarned
+        
+        // Update player score via store
+        if (pointsEarned > 0) {
+          goToQuestion(idx)
+          submitRound2Answer(answer.code)
+        }
       }
-    })
+    }
     
     // Mark round 2 as completed and sync to database
     // This prevents the user from re-attending round 2
