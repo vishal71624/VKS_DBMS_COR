@@ -6,30 +6,25 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  webpack: (config, { isServer }) => {
-    // Handle WASM files for PGlite
-    config.experiments = {
-      ...config.experiments,
-      asyncWebAssembly: true,
-    }
-
-    // Ensure .wasm files are handled correctly
-    config.module.rules.push({
-      test: /\.wasm$/,
-      type: 'asset/resource',
-    })
-
-    // Fallback for node modules in browser
-    if (!isServer) {
-      config.resolve.fallback = {
-        ...config.resolve.fallback,
-        fs: false,
-        path: false,
-        crypto: false,
-      }
-    }
-
-    return config
+  // Turbopack config for Next.js 16 (handles WASM for PGlite)
+  turbopack: {
+    rules: {
+      '*.wasm': {
+        loaders: ['file-loader'],
+        as: '*.wasm',
+      },
+    },
+    resolveAlias: {
+      fs: { browser: './empty-module.js' },
+      path: { browser: './empty-module.js' },
+      crypto: { browser: './empty-module.js' },
+    },
+  },
+  experimental: {
+    // Enable WASM support
+    serverActions: {
+      bodySizeLimit: '2mb',
+    },
   },
 }
 
