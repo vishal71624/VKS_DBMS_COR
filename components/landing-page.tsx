@@ -36,9 +36,8 @@ export function LandingPage() {
         {/* Hero Section */}
         <main className="flex-1 flex flex-col items-center justify-center px-6 text-center">
           <h1 className="text-5xl md:text-7xl lg:text-8xl font-bold tracking-tight mb-12">
-            <span className="text-foreground">COMMIT</span>
-            <span className="text-muted-foreground mx-4">or</span>
-            <span className="text-primary">ROLLBACK</span>
+            <span className="text-primary">ITRIX</span>
+            <span className="text-foreground ml-4">2026</span>
           </h1>
 
           <Button
